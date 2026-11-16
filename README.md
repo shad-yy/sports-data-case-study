@@ -14,19 +14,18 @@ flowchart LR
   B -- no --> F[503, no-store]
   B -- yes --> C[(Memory cache)]
   C -- miss --> D[(Redis)]
-  D -- miss --> Q[Request queue: 1 call every 2.4 s]
+  D -- miss --> Q[Request queue per instance: 1 call every 2.4 s]
   Q --> K{Breaker open?}
   K -- yes --> F
   K -- no --> U[Upstream API]
-  U --> Z[Zod schema check]
-  Z --> C
+  U --> C
 ```
 
 - **Two cache tiers.** An in-process cache in front of Upstash Redis, with stale-while-revalidate: a reader gets the cached answer at once and the refresh happens in the background. Stale data is served for up to 24 hours when the upstream is down.
-- **A queue for the strict provider.** Every TheSportsDB call is serialised 2,400 ms apart, which is 25 a minute, under the provider's limit with room to spare. A 429 pauses calls for 30 seconds.
+- **A queue for the strict provider.** Within each server instance, TheSportsDB calls are serialised 2,400 ms apart (25 a minute, under the provider's limit). The queue lives in process memory, so several serverless instances each keep their own pace; it is not a site-wide ceiling. A 429 pauses calls for 30 seconds.
 - **A circuit breaker per operation.** Five 429s in a row open the breaker for a minute. It used to be keyed on the full URL, so `lookupleague.php?id=4328` and `?id=4335` counted separately and the breaker never tripped. It is now keyed on the operation, and a test locks that in.
 - **A time budget per route.** A route makes one blocking upstream call inside a 3-second budget and reads anything optional only if it is already cached. If the budget runs out it answers `503` with `Cache-Control: no-store`, so a failure is never cached as if it were real data.
-- **Schema checks at the boundary.** Upstream responses are parsed with Zod before anything renders them.
+- **Contract tests on provider shapes.** Recorded provider responses are checked against Zod schemas in tests, so a change in a provider's response shape fails a test.
 
 ## What was measured
 
@@ -39,7 +38,7 @@ One route, `/api/spotlight`, during a full upstream outage (recorded in the proj
 
 ## Tests
 
-462 Vitest tests in 73 files, all passing (run 13 Nov 2026). They cover the rate limiter, the circuit-breaker key, admin authentication, log redaction, and network-level fakes with MSW.
+462 Vitest tests in 73 files, all passing (run on 13 Nov 2026 at commit `ca08546`). They cover the rate limiter, the circuit-breaker key, admin authentication, log redaction, and network-level fakes with MSW.
 
 ## Stack
 
@@ -48,5 +47,6 @@ TypeScript, Next.js 14 (App Router), React, Tailwind CSS, Radix UI, Zod, Upstash
 ## What's still open
 
 - If the TheSportsDB key is missing, the client falls back to the provider's public test key. That should fail loudly instead.
+- The TheSportsDB queue paces calls per instance, not across instances; a shared limiter is the next step.
 - Without Redis, the inbound rate limiter falls back to per-instance memory, so its limits don't hold across instances.
 - On 10 Oct 2026 the live `/api/spotlight` returned 503 while the ESPN routes were fine. The bypass that caused the extra calls is fixed; why the upstream faulted is not yet known.
