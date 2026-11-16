@@ -43,10 +43,3 @@ One route, `/api/spotlight`, during a full upstream outage (recorded in the proj
 ## Stack
 
 TypeScript, Next.js 14 (App Router), React, Tailwind CSS, Radix UI, Zod, Upstash Redis, Vitest, MSW.
-
-## What's still open
-
-- If the TheSportsDB key is missing, the client falls back to the provider's public test key. That should fail loudly instead.
-- The TheSportsDB queue paces calls per instance, not across instances; a shared limiter is the next step.
-- Without Redis, the inbound rate limiter falls back to per-instance memory, so its limits don't hold across instances.
-- On 10 Oct 2026 the live `/api/spotlight` returned 503 while the ESPN routes were fine. The bypass that caused the extra calls is fixed; why the upstream faulted is not yet known.
